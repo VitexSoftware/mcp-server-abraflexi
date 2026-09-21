@@ -112,6 +112,8 @@ def _has_usable_data(data: Any) -> Tuple[bool, str]:
             if recs is None:
                 return False, "records=null"
             if isinstance(recs, list):
+                if len(recs) == 0:
+                    return True, "records=0 (empty ok)"
                 return True, f"records={len(recs)}"
             return True, f"records type={type(recs).__name__}"
         if data.get("_context") or data.get("abraflexi_url") or data.get("company"):
@@ -152,6 +154,16 @@ def _first_record_id(payload: Any) -> Optional[str]:
             if isinstance(v, dict) and v.get("id") is not None:
                 return str(v["id"])
     return None
+
+
+def _safe_qr(server: Any, inv_id: str) -> Any:
+    """QR export is document-type dependent; treat HTTP 400 as soft skip."""
+    from python_abraflexi.exceptions import AbraFlexiException
+
+    try:
+        return server.evidence_get_qr_code(evidence="faktura-vydana", id=inv_id)
+    except AbraFlexiException as exc:
+        return {"success": False, "skipped_reason": str(exc)[:200]}
 
 
 def _run_check(
@@ -435,13 +447,26 @@ def run_scenario(
         lambda: server.contact_get_bank_accounts(id=contact_id),
         skip_reason=None if contact_id else "no contact id",
     )
+
+    uq = _run_check(
+        report,
+        "user_query_list",
+        "tool",
+        lambda: server.user_query_list(limit=5),
+    )
+    query_id = _first_record_id(uq)
+    if query_id is None and uq is not None:
+        parsed_uq = _parse_payload(uq)
+        if isinstance(parsed_uq, dict):
+            recs = parsed_uq.get("records")
+            if isinstance(recs, list) and recs and isinstance(recs[0], dict):
+                query_id = str(recs[0].get("kod") or recs[0].get("id") or "") or None
     _run_check(
         report,
         "call_user_query",
         "tool",
-        lambda: server.call_user_query(query_id="nonexistent-query-for-capability-probe"),
-        require_data=False,
-        skip_reason="needs a real saved user query id/code on this company",
+        lambda: server.call_user_query(query_id=query_id),
+        skip_reason=None if query_id else "no saved user query on this company",
     )
     _run_check(
         report,
@@ -454,6 +479,99 @@ def run_scenario(
         if (inv_id and attachment_id)
         else "needs a real attachment id on an issued invoice",
     )
+
+    # Local-file read exports (AbraFlexi state unchanged)
+    import tempfile
+    from pathlib import Path as _Path
+
+    if inv_id and attachment_id:
+        with tempfile.TemporaryDirectory(prefix="abra-mcp-live-") as tmp:
+            dl = str(_Path(tmp) / "att.bin")
+            _run_check(
+                report,
+                "evidence_download_attachment",
+                "tool",
+                lambda: server.evidence_download_attachment(
+                    evidence="faktura-vydana",
+                    id=inv_id,
+                    attachment_id=attachment_id,
+                    output_path=dl,
+                ),
+            )
+            thumb = str(_Path(tmp) / "thumb.bin")
+
+            def _thumb():
+                from python_abraflexi.exceptions import AbraFlexiException
+
+                try:
+                    return server.evidence_get_attachment_thumbnail(
+                        evidence="faktura-vydana",
+                        id=inv_id,
+                        attachment_id=attachment_id,
+                        output_path=thumb,
+                    )
+                except (ValueError, AbraFlexiException) as exc:
+                    # Non-image / unsupported attachments often 400/404
+                    return {"success": False, "skipped_reason": str(exc)[:200]}
+
+            _run_check(
+                report,
+                "evidence_get_attachment_thumbnail",
+                "tool",
+                _thumb,
+                require_data=False,
+            )
+    else:
+        _run_check(
+            report,
+            "evidence_download_attachment",
+            "tool",
+            lambda: None,
+            skip_reason="needs attachment id",
+        )
+        _run_check(
+            report,
+            "evidence_get_attachment_thumbnail",
+            "tool",
+            lambda: None,
+            skip_reason="needs attachment id",
+        )
+
+    if inv_id:
+        with tempfile.TemporaryDirectory(prefix="abra-mcp-live-") as tmp:
+            pdf = str(_Path(tmp) / "report.pdf")
+            _run_check(
+                report,
+                "evidence_export_report",
+                "tool",
+                lambda: server.evidence_export_report(
+                    evidence="faktura-vydana",
+                    id=inv_id,
+                    output_path=pdf,
+                ),
+            )
+            _run_check(
+                report,
+                "evidence_get_qr_code",
+                "tool",
+                lambda: _safe_qr(server, inv_id),
+                require_data=False,
+            )
+    else:
+        _run_check(
+            report,
+            "evidence_export_report",
+            "tool",
+            lambda: None,
+            skip_reason="no issued invoice id",
+        )
+        _run_check(
+            report,
+            "evidence_get_qr_code",
+            "tool",
+            lambda: None,
+            skip_reason="no issued invoice id",
+        )
 
     # Track which RO tools we explicitly covered
     covered = {r.name.split(":")[0] for r in report.results if r.kind == "tool"}

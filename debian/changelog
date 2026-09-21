@@ -1,3 +1,16 @@
+mcp-server-abraflexi (1.5.2) unstable; urgency=medium
+
+  * Mark attachment download/thumbnail, report export and QR tools as
+    read-only (they do not mutate AbraFlexi; local file write only).
+  * Implement attachment list/get/download/thumbnail via ReadOnly HTTP
+    paths instead of ReadWrite convenience wrappers.
+  * Add user_query_list tool; live scenario probes queries, attachments,
+    report export and QR against the official FlexiBee demo.
+  * Default .env.example to demo.flexibee.eu / company demo; CI runs the
+    live capability scenario on every push.
+
+ -- vitex <info@vitexsoftware.cz>  Mon, 21 Sep 2026 11:00:00 +0200
+
 mcp-server-abraflexi (1.5.1) unstable; urgency=medium
 
   * evidence_list now fetches the live /c/{company}/evidence-list.json

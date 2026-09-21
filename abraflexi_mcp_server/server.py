@@ -358,6 +358,26 @@ def validate_read_only() -> None:
         raise ValueError("Server is in read-only mode - write operations are not allowed")
 
 
+def _require_record_identifier(
+    id: Optional[str] = None,
+    kod: Optional[str] = None,
+) -> Union[int, str]:
+    """Resolve a record id or code into an AbraFlexi identifier."""
+    if not id and not kod:
+        raise ValueError("Either id or kod must be provided")
+    return int(id) if id else f"code:{kod}"
+
+
+# Annotations for tools that only read AbraFlexi state (may still write a
+# local file as an output side-effect).
+_RO_ANN = {
+    "readOnlyHint": True,
+    "destructiveHint": False,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+
+
 # ISSUED INVOICES (Faktura Vydaná)
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
 def invoice_issued_get(
@@ -1638,7 +1658,9 @@ def evidence_batch_update(
 
 
 # ATTACHMENTS (listing, metadata, download, thumbnail, delete)
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+# Attachment GETs use ReadOnly.perform_request — python-abraflexi only exposes
+# convenience wrappers on ReadWrite, but the HTTP paths are read-only.
+@mcp.tool(annotations=_RO_ANN)
 def evidence_list_attachments(evidence: str, id: Optional[str] = None, kod: Optional[str] = None) -> str:
     """List attachments (prilohy) of a record in any AbraFlexi evidence.
 
@@ -1650,21 +1672,13 @@ def evidence_list_attachments(evidence: str, id: Optional[str] = None, kod: Opti
     Returns:
         str: JSON formatted list of attachments
     """
-    if not id and not kod:
-        raise ValueError("Either id or kod must be provided")
-
-    identifier = int(id) if id else f"code:{kod}"
-    client = get_readwrite_client(evidence)
-
-    if not client.load_from_abraflexi(identifier):
-        raise ValueError(f"Record not found in {evidence}: {identifier}")
-
-    result = client.list_attachments()
-
+    identifier = _require_record_identifier(id, kod)
+    client = get_readonly_client(evidence)
+    result = client.perform_request(url_suffix=f"{identifier}/prilohy.json")
     return format_response(result)
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+@mcp.tool(annotations=_RO_ANN)
 def evidence_get_attachment(
     evidence: str,
     attachment_id: str,
@@ -1682,21 +1696,15 @@ def evidence_get_attachment(
     Returns:
         str: JSON formatted attachment metadata
     """
-    if not id and not kod:
-        raise ValueError("Either id or kod must be provided")
-
-    identifier = int(id) if id else f"code:{kod}"
-    client = get_readwrite_client(evidence)
-
-    if not client.load_from_abraflexi(identifier):
-        raise ValueError(f"Record not found in {evidence}: {identifier}")
-
-    result = client.get_attachment(attachment_id)
-
+    identifier = _require_record_identifier(id, kod)
+    client = get_readonly_client(evidence)
+    result = client.perform_request(
+        url_suffix=f"{identifier}/prilohy/{attachment_id}.json"
+    )
     return format_response(result)
 
 
-@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True})
+@mcp.tool(annotations=_RO_ANN)
 def evidence_download_attachment(
     evidence: str,
     attachment_id: str,
@@ -1705,6 +1713,8 @@ def evidence_download_attachment(
     kod: Optional[str] = None
 ) -> str:
     """Download an attachment's raw content to a local file.
+
+    Does not modify AbraFlexi data; only writes ``output_path`` on the MCP host.
 
     Args:
         evidence: Evidence name
@@ -1716,16 +1726,12 @@ def evidence_download_attachment(
     Returns:
         str: JSON formatted result with the written file path and size
     """
-    if not id and not kod:
-        raise ValueError("Either id or kod must be provided")
-
-    identifier = int(id) if id else f"code:{kod}"
-    client = get_readwrite_client(evidence)
-
-    if not client.load_from_abraflexi(identifier):
-        raise ValueError(f"Record not found in {evidence}: {identifier}")
-
-    content = client.download_attachment(attachment_id)
+    identifier = _require_record_identifier(id, kod)
+    client = get_readonly_client(evidence)
+    content = client.perform_request(
+        url_suffix=f"{identifier}/prilohy/{attachment_id}/content",
+        binary=True,
+    )
     if not content:
         raise ValueError(f"Attachment not found: {attachment_id}")
 
@@ -1735,7 +1741,7 @@ def evidence_download_attachment(
     return format_response({"success": True, "path": output_path, "size_bytes": len(content)})
 
 
-@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True})
+@mcp.tool(annotations=_RO_ANN)
 def evidence_get_attachment_thumbnail(
     evidence: str,
     attachment_id: str,
@@ -1746,6 +1752,8 @@ def evidence_get_attachment_thumbnail(
     height: Optional[int] = None
 ) -> str:
     """Download the thumbnail of an image attachment to a local file.
+
+    Does not modify AbraFlexi data; only writes ``output_path`` on the MCP host.
 
     Args:
         evidence: Evidence name
@@ -1759,18 +1767,20 @@ def evidence_get_attachment_thumbnail(
     Returns:
         str: JSON formatted result with the written file path and size
     """
-    if not id and not kod:
-        raise ValueError("Either id or kod must be provided")
+    identifier = _require_record_identifier(id, kod)
+    suffix = f"{identifier}/prilohy/{attachment_id}/thumbnail"
+    params = []
+    if width:
+        params.append(f"w={width}")
+    if height:
+        params.append(f"h={height}")
+    if params:
+        suffix += "?" + "&".join(params)
 
-    identifier = int(id) if id else f"code:{kod}"
-    client = get_readwrite_client(evidence)
-
-    if not client.load_from_abraflexi(identifier):
-        raise ValueError(f"Record not found in {evidence}: {identifier}")
-
-    content = client.get_attachment_thumbnail(attachment_id, width=width, height=height)
+    client = get_readonly_client(evidence)
+    content = client.perform_request(url_suffix=suffix, binary=True)
     if not content:
-        raise ValueError(f"Thumbnail not available for attachment: {attachment_id}")
+        raise ValueError(f"Thumbnail not found for attachment: {attachment_id}")
 
     with open(output_path, "wb") as fh:
         fh.write(content)
@@ -1798,10 +1808,7 @@ def evidence_delete_attachment(
     """
     validate_read_only()
 
-    if not id and not kod:
-        raise ValueError("Either id or kod must be provided")
-
-    identifier = int(id) if id else f"code:{kod}"
+    identifier = _require_record_identifier(id, kod)
     client = get_readwrite_client(evidence)
 
     if not client.load_from_abraflexi(identifier):
@@ -1813,7 +1820,7 @@ def evidence_delete_attachment(
 
 
 # REPORTS, QR CODES & USER QUERIES
-@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True})
+@mcp.tool(annotations=_RO_ANN)
 def evidence_export_report(
     evidence: str,
     output_path: str,
@@ -1826,6 +1833,8 @@ def evidence_export_report(
 ) -> str:
     """Export a printable report (PDF/XLSX) for a record, or the whole
     evidence listing, to a local file.
+
+    Does not modify AbraFlexi data; only writes ``output_path`` on the MCP host.
 
     Args:
         evidence: Evidence name
@@ -1847,6 +1856,7 @@ def evidence_export_report(
     elif kod:
         record_id = f"code:{kod}"
 
+    # export_report lives on ReadWrite in python-abraflexi; the HTTP call is GET.
     client = get_readwrite_client(evidence)
     content = client.export_report(
         record_id=record_id,
@@ -1864,7 +1874,7 @@ def evidence_export_report(
     return format_response({"success": True, "path": output_path, "size_bytes": len(content)})
 
 
-@mcp.tool(annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": True, "openWorldHint": True})
+@mcp.tool(annotations=_RO_ANN)
 def evidence_get_qr_code(
     evidence: str,
     id: Optional[str] = None,
@@ -1873,6 +1883,9 @@ def evidence_get_qr_code(
     output_path: Optional[str] = None
 ) -> str:
     """Get the payment QR code for a document record.
+
+    Does not modify AbraFlexi data. Optionally writes a local PNG when
+    ``output_path`` is set; otherwise returns a base64 data URI.
 
     Args:
         evidence: Evidence name (e.g., 'faktura-vydana')
@@ -1886,10 +1899,8 @@ def evidence_get_qr_code(
         str: JSON formatted result - either the written file path, or a
             base64 data URI
     """
-    if not id and not kod:
-        raise ValueError("Either id or kod must be provided")
-
-    identifier = int(id) if id else f"code:{kod}"
+    identifier = _require_record_identifier(id, kod)
+    # QR helpers live on ReadWrite in python-abraflexi; the HTTP call is GET.
     client = get_readwrite_client(evidence)
 
     if not client.load_from_abraflexi(identifier):
@@ -1907,7 +1918,35 @@ def evidence_get_qr_code(
     return format_response({"success": bool(data_uri), "data_uri": data_uri})
 
 
-@mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": True})
+@mcp.tool(annotations=_RO_ANN)
+def user_query_list(
+    limit: Optional[int] = None,
+    detail: str = "custom:id,kod,nazev",
+) -> str:
+    """List saved user-defined queries (uzivatelsky-dotaz) on the bound company.
+
+    Args:
+        limit: Maximum number of queries to return
+        detail: AbraFlexi detail level (default returns id/kod/nazev)
+
+    Returns:
+        str: JSON object with ``_context`` and ``records``
+    """
+    client = get_readonly_client("uzivatelsky-dotaz")
+    client.default_url_params["detail"] = detail
+    if limit:
+        client.default_url_params["limit"] = limit
+    result = client.get_all_from_abraflexi()
+    return format_records_response(
+        result,
+        record_note=(
+            "These are saved user queries (uzivatelsky-dotaz) belonging to the "
+            "bound company. Pass a record's id or kod to call_user_query."
+        ),
+    )
+
+
+@mcp.tool(annotations=_RO_ANN)
 def call_user_query(
     query_id: str,
     params: Optional[Dict[str, Any]] = None,
@@ -1916,7 +1955,7 @@ def call_user_query(
     """Call a saved user-defined query (uzivatelsky dotaz).
 
     Args:
-        query_id: Identifier of the saved query
+        query_id: Identifier of the saved query (id or code from user_query_list)
         params: Query parameters; a list value repeats the parameter in the
             URL, matching AbraFlexi's N-arity query parameter syntax
         method: HTTP method to use (GET or POST)

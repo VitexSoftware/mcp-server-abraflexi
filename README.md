@@ -12,7 +12,7 @@ A comprehensive Model Context Protocol (MCP) server for AbraFlexi integration us
 
 ## Features
 
-68 tools in total, covering the full REST surface exposed by
+69 tools in total, covering the full REST surface exposed by
 [python-abraflexi](https://github.com/VitexSoftware/python-abraflexi):
 dedicated tools for the most common evidences (invoices, contacts,
 products, bank transactions), plus generic `evidence_*` tools that work
@@ -107,6 +107,7 @@ against *any* AbraFlexi evidence by name.
 ### 🧾 Reports, QR Codes & User Queries
 - `evidence_export_report` - Export a PDF/XLSX report for a record or evidence listing
 - `evidence_get_qr_code` - Get a document's payment QR code (file or base64 data URI)
+- `user_query_list` - List saved user-defined queries (uzivatelsky-dotaz)
 - `call_user_query` - Call a saved user-defined query (uživatelský dotaz)
 
 ### ℹ️ Evidence Metadata & Summation
