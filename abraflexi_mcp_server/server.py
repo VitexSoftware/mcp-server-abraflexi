@@ -2696,29 +2696,59 @@ def abraflexi_client_call(
 
 @mcp.tool(annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False})
 def evidence_list() -> str:
-    """List all available AbraFlexi evidences.
-    
+    """List all evidences available on the bound AbraFlexi company.
+
+    Fetches ``/c/{company}/evidence-list.json`` so the result matches the
+    live instance (typically 200+ evidences), not a hardcoded subset.
+
     Returns:
-        str: JSON formatted list of evidence names
+        str: JSON object with ``count`` and ``evidences`` (each entry has
+            at least ``name`` / ``evidencePath`` and ``description`` /
+            ``evidenceName`` when the API provides them).
     """
-    # Common AbraFlexi evidences
-    evidences = [
-        {"name": "faktura-vydana", "description": "Issued invoices"},
-        {"name": "faktura-prijata", "description": "Received invoices"},
-        {"name": "adresar", "description": "Contacts and companies"},
-        {"name": "cenik", "description": "Products and services"},
-        {"name": "banka", "description": "Bank transactions"},
-        {"name": "pokladna", "description": "Cash transactions"},
-        {"name": "nabidka-vydana", "description": "Issued quotes"},
-        {"name": "objednavka-vydana", "description": "Issued orders"},
-        {"name": "objednavka-prijata", "description": "Received orders"},
-        {"name": "dodaci-list", "description": "Delivery notes"},
-        {"name": "sklad", "description": "Warehouse/stock"},
-        {"name": "cenova-uroven", "description": "Price levels"},
-        {"name": "typ-smlouvy", "description": "Contract types"},
-    ]
-    
-    return format_response(evidences)
+    # evidence=None → company-level URL; suffix hits evidence-list.json
+    config = get_abraflexi_config()
+    client = ReadOnly(None, {**config, "evidence": None})
+    raw = client.perform_request(url_suffix="evidence-list.json")
+
+    evidences: List[Dict[str, Any]] = []
+    if isinstance(raw, dict):
+        # AbraFlexi wraps as {"evidences": {"evidence": [...]}} or similar
+        block = raw.get("evidences") or raw.get("winstrom") or raw
+        if isinstance(block, dict):
+            items = block.get("evidence") or block.get("evidences") or []
+        else:
+            items = block
+        if isinstance(items, dict):
+            items = [items]
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                path = item.get("evidencePath") or item.get("name")
+                if not path:
+                    continue
+                evidences.append(
+                    {
+                        "name": path,
+                        "description": item.get("evidenceName")
+                        or item.get("evidenceType")
+                        or item.get("description"),
+                        "evidenceType": item.get("evidenceType"),
+                        "dbName": item.get("dbName"),
+                        "extIdSupported": item.get("extIdSupported"),
+                        "importStatus": item.get("importStatus"),
+                    }
+                )
+
+    if not evidences:
+        raise ValueError(
+            "Could not load evidence-list from AbraFlexi "
+            f"(response type={type(raw).__name__})"
+        )
+
+    evidences.sort(key=lambda e: str(e.get("name") or ""))
+    return format_response({"count": len(evidences), "evidences": evidences})
 
 
 def main():

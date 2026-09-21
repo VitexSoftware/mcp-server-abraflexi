@@ -1,3 +1,13 @@
+mcp-server-abraflexi (1.5.1) unstable; urgency=medium
+
+  * evidence_list now fetches the live /c/{company}/evidence-list.json
+    catalog (264 evidences on testa_invest) instead of a hardcoded list
+    of 13 common evidences.
+  * Add tests/live_capability_scenario.py for end-to-end MCP tool checks
+    against a real AbraFlexi company.
+
+ -- vitex <info@vitexsoftware.cz>  Mon, 21 Sep 2026 10:55:00 +0200
+
 mcp-server-abraflexi (1.5.0) unstable; urgency=medium
 
   * Add server_info tool and company-context envelope on evidence

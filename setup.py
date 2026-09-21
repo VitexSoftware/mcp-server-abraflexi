@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="abraflexi-mcp-server",
-    version="1.5.0",
+    version="1.5.1",
     description="A comprehensive MCP server for AbraFlexi integration",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

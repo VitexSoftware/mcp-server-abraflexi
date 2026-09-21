@@ -25,6 +25,11 @@ uv run python -m abraflexi_mcp_server.server
 # Run tests (tool registration + AbraFlexi connection)
 uv run python scripts/test_server.py
 
+# Live capability scenario against a real company
+python tests/live_capability_scenario.py \
+  --url "$ABRAFLEXI_URL" --company "$ABRAFLEXI_COMPANY" \
+  --login "$ABRAFLEXI_LOGIN" --password "$ABRAFLEXI_PASSWORD"
+
 # Build PyPI package
 python3 -m build
 python3 -m twine upload dist/*
@@ -33,7 +38,9 @@ python3 -m twine upload dist/*
 dpkg-buildpackage -us -uc -b
 ```
 
-There is no linter, formatter, or type-checker configured. There is no pytest suite — the only tests are in `scripts/test_server.py` (run as a script, not via pytest).
+There is no linter, formatter, or type-checker configured. Functional tests are
+`scripts/test_server.py` and `tests/live_capability_scenario.py` (run as scripts,
+not via pytest).
 
 ## Architecture
 

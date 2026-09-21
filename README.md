@@ -83,7 +83,7 @@ against *any* AbraFlexi evidence by name.
 - `evidence_create` - Create record in any evidence
 - `evidence_update` - Update record in any evidence (supports `remove_external_ids`)
 - `evidence_delete` - Delete record from any evidence
-- `evidence_list` - List all available evidences
+- `evidence_list` - List all evidences available on the bound company (live `evidence-list.json`)
 
 ### 🧠 Python-abraflexi Bridge
 - `abraflexi_client_methods` - List public methods of core python-abraflexi clients (`ReadOnly`, `ReadWrite`, `Changes`, `Adresar`, `FakturaVydana`)
@@ -481,12 +481,18 @@ abraflexi-mcp-server/
 ### Running Tests
 
 ```bash
-# Test server functionality
+# Tool registration + basic connectivity
 uv run python scripts/test_server.py
 
-# Test with specific environment
-ABRAFLEXI_URL=https://your-server.com uv run python scripts/test_server.py
+# Live capability scenario (all read tools + READ_ONLY write guards)
+python tests/live_capability_scenario.py \
+  --url https://flexibee-dev.spoje.net:5434 \
+  --company testa_invest_s_r_o_ \
+  --login "$ABRAFLEXI_LOGIN" --password "$ABRAFLEXI_PASSWORD" \
+  --json-out /tmp/abra-live.json
 ```
+
+Exit code is non-zero when any non-skipped check fails.
 
 ## Error Handling
 
