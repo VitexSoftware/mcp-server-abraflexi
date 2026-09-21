@@ -485,6 +485,14 @@ abraflexi-mcp-server/
 uv run python scripts/test_server.py
 
 # Live capability scenario (all read tools + READ_ONLY write guards)
+# Official public demo (login winstrom / winstrom):
+python tests/live_capability_scenario.py \
+  --url https://demo.flexibee.eu:5434 \
+  --company demo \
+  --login winstrom --password winstrom \
+  --json-out /tmp/abra-demo-live.json
+
+# Private/dev company example:
 python tests/live_capability_scenario.py \
   --url https://flexibee-dev.spoje.net:5434 \
   --company testa_invest_s_r_o_ \

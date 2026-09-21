@@ -6,15 +6,15 @@ each capability returns usable data (or correctly refuses writes under
 READ_ONLY).
 
 Usage:
+  # Official public demo
+  python tests/live_capability_scenario.py \\
+    --url https://demo.flexibee.eu:5434 --company demo \\
+    --login winstrom --password winstrom
+
   ABRAFLEXI_URL=https://flexibee-dev.spoje.net:5434 \\
   ABRAFLEXI_COMPANY=testa_invest_s_r_o_ \\
   ABRAFLEXI_LOGIN=admin ABRAFLEXI_PASSWORD=... READ_ONLY=true \\
     python tests/live_capability_scenario.py
-
-  python tests/live_capability_scenario.py \\
-    --url https://flexibee-dev.spoje.net:5434 \\
-    --company testa_invest_s_r_o_ \\
-    --login admin --password '...'
 
 Exit code is 0 only when every non-skipped check passes.
 """
@@ -385,13 +385,28 @@ def run_scenario(
         lambda: server.evidence_get_record_changes(evidence="faktura-vydana", id=inv_id),
         skip_reason=None if inv_id else "no issued invoice id",
     )
-    _run_check(
+    atts = _run_check(
         report,
         "evidence_list_attachments",
         "tool",
         lambda: server.evidence_list_attachments(evidence="faktura-vydana", id=inv_id),
         skip_reason=None if inv_id else "no issued invoice id",
     )
+    attachment_id = None
+    if atts is not None:
+        parsed_atts = _parse_payload(atts)
+        if isinstance(parsed_atts, list) and parsed_atts:
+            first_att = parsed_atts[0]
+            if isinstance(first_att, dict) and first_att.get("id") is not None:
+                attachment_id = str(first_att["id"])
+        elif isinstance(parsed_atts, dict):
+            # some clients wrap attachments
+            for key in ("priloha", "prilohy", "attachments", "records"):
+                items = parsed_atts.get(key)
+                if isinstance(items, list) and items and isinstance(items[0], dict):
+                    if items[0].get("id") is not None:
+                        attachment_id = str(items[0]["id"])
+                        break
     _run_check(
         report,
         "contact_get_notification_email",
@@ -424,7 +439,7 @@ def run_scenario(
         report,
         "call_user_query",
         "tool",
-        lambda: server.call_user_query(query="nonexistent-query-for-capability-probe"),
+        lambda: server.call_user_query(query_id="nonexistent-query-for-capability-probe"),
         require_data=False,
         skip_reason="needs a real saved user query id/code on this company",
     )
@@ -433,9 +448,11 @@ def run_scenario(
         "evidence_get_attachment",
         "tool",
         lambda: server.evidence_get_attachment(
-            evidence="faktura-vydana", id=inv_id, attachment_id="1"
+            evidence="faktura-vydana", id=inv_id, attachment_id=attachment_id
         ),
-        skip_reason="needs a real attachment id (skipped in generic scenario)",
+        skip_reason=None
+        if (inv_id and attachment_id)
+        else "needs a real attachment id on an issued invoice",
     )
 
     # Track which RO tools we explicitly covered
