@@ -10,14 +10,14 @@
 // installable there (missing/incompatible builds for jammy's older
 // Python base), so the install-test stage fails with "held broken
 // packages" (see build #27:
-// https://jenkins.proxy.spojenet.cz/job/VitexSoftware/job/abraflexi-mcp-server/27/).
+// https://jenkins.proxy.spojenet.cz/job/VitexSoftware/job/mcp-server-abraflexi/27/).
 // Re-enable once those dependencies have working jammy builds.
 //
 // debian:bookworm and ubuntu:noble disabled: same class of problem as
 // jammy above, but for python3-fastmcp's own transitive dependencies
 // (python3-opentelemetry-api, python3-py-key-value-aio, ...), which are
 // only currently built for trixie in this repo (see build #28:
-// https://jenkins.proxy.spojenet.cz/job/VitexSoftware/job/abraflexi-mcp-server/28/).
+// https://jenkins.proxy.spojenet.cz/job/VitexSoftware/job/mcp-server-abraflexi/28/).
 // Re-enable once fastmcp's dependency chain has working bookworm/noble
 // builds.
 String[] distributions = ['debian:trixie']
