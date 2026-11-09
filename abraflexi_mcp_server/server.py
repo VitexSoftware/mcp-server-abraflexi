@@ -2294,13 +2294,39 @@ def _redact_hook_secrets(data: Any) -> Any:
     return data
 
 
+def _hook_host_allowed(host: str) -> bool:
+    """Check ``host`` against ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS (unset = no restriction).
+
+    The variable holds comma-separated host names; ``*.example.com`` matches
+    every sub-domain of example.com.
+    """
+    raw = os.getenv("ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS", "").strip()
+    if not raw:
+        return True
+    host = host.lower()
+    for pattern in (p.strip().lower() for p in raw.split(",") if p.strip()):
+        if host == pattern or (pattern.startswith("*.") and host.endswith(pattern[1:])):
+            return True
+    return False
+
+
 def _validate_hook_url(url: str) -> str:
-    """Accept only plain http(s) URLs without embedded credentials."""
+    """Accept only plain http(s) URLs without embedded credentials.
+
+    A hook receives EVERY change of the company, so where it points matters:
+    set ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS to restrict the receivers this server
+    may register (checked on the host name, as AbraFlexi - not this process -
+    resolves and calls the URL).
+    """
     parts = urlsplit(url.strip())
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise ValueError("Hook url must be an absolute http:// or https:// URL")
     if parts.username or parts.password:
         raise ValueError("Hook url must not contain credentials; use sec_key instead")
+    if not _hook_host_allowed(parts.hostname):
+        raise ValueError(
+            f"Host '{parts.hostname}' is not allowed by ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS"
+        )
     return url.strip()
 
 
@@ -2387,8 +2413,9 @@ def webhook_register(
 
     Creates a new hook on the AbraFlexi server (calling it twice registers two
     hooks, so check webhook_list first). A hook cannot be filtered by evidence;
-    the receiver gets all changes. Ask the user for confirmation before
-    registering a hook that points at a production receiver.
+    the receiver gets all changes, so only register receivers the user named
+    and ask for confirmation first. Operators can restrict the allowed hosts
+    with ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS.
 
     Returns:
         str: JSON result of the registration (secKey is masked)

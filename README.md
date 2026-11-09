@@ -144,7 +144,11 @@ every change. See the AbraFlexi API docs, *Web Hooks*.
 | `webhook_unregister` | Remove a hook | destructive, idempotent |
 | `webhook_retry` | Reset the failure penalty and call the URL now | create-like (not idempotent) |
 
-Write tools respect `READ_ONLY` (default `true`). `sec_key` is sent to AbraFlexi
+Write tools respect `READ_ONLY` (default `true`). A hook delivers **every** change
+of the company to its receiver, so set `ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS`
+(comma-separated host names, `*.example.com` allowed) to restrict where
+`webhook_register` may point hooks; when unset any `http(s)` host is accepted.
+`sec_key` is sent to AbraFlexi
 as the `X-FB-Hook-SecKey` secret and is masked in every tool response and error
 message. Only absolute `http(s)` URLs without embedded credentials are accepted.
 
@@ -235,6 +239,7 @@ cp .env.example .env
 ### Optional Configuration
 
 - `READ_ONLY` - Set to `true`, `1`, or `yes` to enable read-only mode (default: `true`)
+- `ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS` - Optional comma-separated allowlist of host names `webhook_register` may use as hook receivers, e.g. `multiflexi.vitexsoftware.com,*.spoje.net` (default: unrestricted)
 - `ABRAFLEXI_TIMEOUT` - Request timeout in seconds (default: `300`)
 
 ### Transport Configuration

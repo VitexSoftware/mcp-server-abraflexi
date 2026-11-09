@@ -148,3 +148,31 @@ def test_hooks_disabled_gives_actionable_message():
     with patch_client(client):
         with pytest.raises(ValueError, match="enableHooks"):
             server.webhook_list()
+
+
+@pytest.mark.parametrize("url,allowed", [
+    ("https://multiflexi.vitexsoftware.com/hook", True),
+    ("https://a.spoje.net/hook", True),
+    ("https://spoje.net.evil.com/hook", False),
+    ("https://evil.com/hook", False),
+    ("https://notspoje.net/hook", False),
+])
+def test_register_honours_allowed_hosts(monkeypatch, url, allowed):
+    monkeypatch.setenv("ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS", "multiflexi.vitexsoftware.com, *.spoje.net")
+    client = FakeClient()
+    with patch_client(client):
+        if allowed:
+            server.webhook_register(url=url)
+            assert client.calls[0][2]["url"] == url
+        else:
+            with pytest.raises(ValueError, match="ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS"):
+                server.webhook_register(url=url)
+            assert client.calls == []
+
+
+def test_register_unrestricted_when_allowlist_unset(monkeypatch):
+    monkeypatch.delenv("ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS", raising=False)
+    client = FakeClient()
+    with patch_client(client):
+        server.webhook_register(url="https://anything.example/hook")
+    assert client.calls[0][2]["url"] == "https://anything.example/hook"
