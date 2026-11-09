@@ -8,7 +8,7 @@ case "$1" in
         mcprack server create mcp-server-abraflexi \
           --label 'AbraFlexi MCP Server' \
           --transport stdio \
-          --command /usr/bin/abraflexi-mcp-server \
+          --command /usr/bin/mcp-server-abraflexi \
           --category debian \
           --enabled" || true
     fi

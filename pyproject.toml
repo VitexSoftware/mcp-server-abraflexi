@@ -34,7 +34,8 @@ Issues = "https://github.com/VitexSoftware/abraflexi-mcp-server/issues"
 Documentation = "https://github.com/VitexSoftware/abraflexi-mcp-server#readme"
 
 [project.scripts]
-abraflexi-mcp = "abraflexi_mcp_server.server:main"
+mcp-server-abraflexi = "abraflexi_mcp_server.server:main"
+abraflexi-mcp = "abraflexi_mcp_server.server:main"  # deprecated alias
 
 [build-system]
 requires = ["setuptools>=61"]

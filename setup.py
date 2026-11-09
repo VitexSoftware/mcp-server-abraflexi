@@ -18,6 +18,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
+            "mcp-server-abraflexi=abraflexi_mcp_server.server:main",
             "abraflexi-mcp=abraflexi_mcp_server.server:main",
         ],
     },

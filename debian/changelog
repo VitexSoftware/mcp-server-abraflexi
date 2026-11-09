@@ -1,3 +1,13 @@
+mcp-server-abraflexi (1.5.3) unstable; urgency=medium
+
+  * Unify launcher name with the package: install /usr/bin/mcp-server-abraflexi
+    (console script); keep abraflexi-mcp as a deprecated alias.
+  * Fix mcprack companion postinst: it registered the non-existent
+    /usr/bin/abraflexi-mcp-server; now registers /usr/bin/mcp-server-abraflexi.
+  * Rename man page abraflexi-mcp(1) to mcp-server-abraflexi(1).
+
+ -- vitex <info@vitexsoftware.cz>  Wed, 30 Sep 2026 10:00:00 +0200
+
 mcp-server-abraflexi (1.5.2) unstable; urgency=medium
 
   * Mark attachment download/thumbnail, report export and QR tools as
