@@ -348,6 +348,7 @@ def run_scenario(
         lambda: server.evidence_get_sum(evidence="faktura-vydana"),
     )
     _run_check(report, "changes_status", "tool", server.changes_status)
+    _run_check(report, "webhook_list", "tool", server.webhook_list)
     _run_check(
         report,
         "changes_get",

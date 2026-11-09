@@ -128,6 +128,26 @@ against *any* AbraFlexi evidence by name.
 - `changes_status` - Check whether change tracking is enabled
 - `changes_get` - Page through recorded changes since a given version
 
+### 🪝 Web Hooks (push notifications about changes)
+AbraFlexi POSTs the changes since the previous call to every registered hook URL
+(same body as the Changes API, usually within seconds, not counted towards the
+API request limit). Hooks need the Changes API enabled for the company
+(`changes_enable`) and, on self-hosted servers, `enableHooks=true` in
+`flexibee-server.xml`. A hook cannot be filtered by evidence: the receiver gets
+every change. See the AbraFlexi API docs, *Web Hooks*.
+
+| Tool | Purpose | Annotation class |
+|---|---|---|
+| `webhook_list` | List registered hooks of the bound company | read-only |
+| `webhook_get` | One hook incl. its current failure penalty | read-only |
+| `webhook_register` | Register a hook (`url`, `format` JSON/XML, optional `sec_key`, `last_version`, `skip_url_test`). AbraFlexi sends an empty test call and refuses the hook unless the URL answers 2xx | create (not idempotent, check `webhook_list` first) |
+| `webhook_unregister` | Remove a hook | destructive, idempotent |
+| `webhook_retry` | Reset the failure penalty and call the URL now | create-like (not idempotent) |
+
+Write tools respect `READ_ONLY` (default `true`). `sec_key` is sent to AbraFlexi
+as the `X-FB-Hook-SecKey` secret and is masked in every tool response and error
+message. Only absolute `http(s)` URLs without embedded credentials are accepted.
+
 ## Installation
 
 ### Prerequisites
@@ -456,6 +476,9 @@ abraflexi-mcp-server/
 ├── abraflexi_mcp_server/
 │   ├── __init__.py
 │   └── server.py                  # Main server implementation
+├── tests/
+│   ├── live_capability_scenario.py  # Live scenario against a real company
+│   └── test_webhooks.py           # Unit tests for the web hook tools (pytest)
 ├── appimage/
 │   ├── AppRun                     # AppImage entry point
 │   ├── abraflexi-mcp-server.desktop
@@ -484,6 +507,9 @@ abraflexi-mcp-server/
 ```bash
 # Tool registration + basic connectivity
 uv run python scripts/test_server.py
+
+# Unit tests (no AbraFlexi needed): web hook tools
+python3 -m pytest tests/test_webhooks.py
 
 # Live capability scenario (all read tools + READ_ONLY write guards)
 # Official public demo (login winstrom / winstrom):

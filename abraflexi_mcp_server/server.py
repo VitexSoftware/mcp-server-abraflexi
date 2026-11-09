@@ -16,11 +16,12 @@ import json
 import logging
 import base64
 import inspect
-from typing import Any, Dict, List, Optional, Union
-from urllib.parse import urlencode
+from typing import Annotated, Any, Dict, List, Literal, Optional, Union
+from urllib.parse import urlencode, urlsplit
 from fastmcp import FastMCP
+from pydantic import Field
 from python_abraflexi import ReadOnly, ReadWrite, Changes, Adresar, FakturaVydana
-from python_abraflexi.exceptions import AuthenticationException, PermissionException
+from python_abraflexi.exceptions import AuthenticationException, PermissionException, AbraFlexiException
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -2259,6 +2260,181 @@ def changes_get(
             "is bound to (see abraflexi_company above / server_info tool)."
         ),
     )
+
+
+# WEB HOOKS (push notifications about changes, see abraflexi-api-doc webhooks.rst)
+#
+# AbraFlexi POSTs the changes since the previous call to every registered hook
+# URL (same body as the Changes API). Hooks need the Changes API enabled for
+# the company and ``enableHooks`` in flexibee-server.xml on self-hosted servers.
+_HOOK_CREATE_ANN = {
+    "readOnlyHint": False,
+    "destructiveHint": False,
+    "idempotentHint": False,
+    "openWorldHint": True,
+}
+_HOOK_MUTATE_ANN = {
+    "readOnlyHint": False,
+    "destructiveHint": True,
+    "idempotentHint": True,
+    "openWorldHint": True,
+}
+_HOOK_SECRET_KEYS = {"seckey", "sec_key", "x-fb-hook-seckey"}
+
+
+def _redact_hook_secrets(data: Any) -> Any:
+    """Return a copy of ``data`` with every hook secret (secKey) masked."""
+    if isinstance(data, dict):
+        return {
+            key: ("***" if str(key).lower() in _HOOK_SECRET_KEYS and value else _redact_hook_secrets(value))
+            for key, value in data.items()
+        }
+    if isinstance(data, list):
+        return [_redact_hook_secrets(item) for item in data]
+    return data
+
+
+def _validate_hook_url(url: str) -> str:
+    """Accept only plain http(s) URLs without embedded credentials."""
+    parts = urlsplit(url.strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError("Hook url must be an absolute http:// or https:// URL")
+    if parts.username or parts.password:
+        raise ValueError("Hook url must not contain credentials; use sec_key instead")
+    return url.strip()
+
+
+def _hooks_request(
+    suffix: str = "",
+    method: str = "GET",
+    params: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Call the /hooks endpoint of the bound company and return parsed data.
+
+    Raises:
+        ValueError: With an actionable message when AbraFlexi refuses the call.
+    """
+    config = get_abraflexi_config()
+    client = ReadWrite(None, {**config, "evidence": "hooks", "autoload": False})
+    if params:
+        client.default_url_params = {**client.default_url_params, **params}
+    try:
+        result = client.perform_request(suffix, method)
+    except AbraFlexiException as exc:
+        # The message may contain the request URL (with the secKey), so mask it.
+        raise ValueError(_hooks_error_message(str(exc), params)) from None
+    if result is False:
+        code = getattr(client, "last_response_code", None)
+        body = getattr(getattr(client, "last_response", None), "text", "") or ""
+        raise ValueError(_hooks_error_message(f"HTTP {code}: {body}".strip(), params))
+    return result
+
+
+def _hooks_error_message(message: str, params: Optional[Dict[str, Any]]) -> str:
+    """Build an actionable error without leaking the secKey."""
+    sec_key = (params or {}).get("secKey")
+    if sec_key:
+        message = message.replace(str(sec_key), "***")
+    if "Hooks are not enabled" in message:
+        return (
+            "Web hooks are not enabled on this AbraFlexi server. Set enableHooks=true "
+            "in flexibee-server.xml (self-hosted) and make sure the Changes API is "
+            "enabled for the company (changes_enable). Server said: " + message
+        )
+    return message
+
+
+@mcp.tool(
+    title="List Web Hooks",
+    annotations=_RO_ANN,
+)
+def webhook_list() -> str:
+    """List the web hooks registered for the company this server is bound to.
+
+    Returns:
+        str: JSON with the registered hooks (secKey values are masked)
+    """
+    return format_response(_redact_hook_secrets(_hooks_request("")))
+
+
+@mcp.tool(
+    title="Get Web Hook",
+    annotations=_RO_ANN,
+)
+def webhook_get(
+    id: Annotated[int, Field(description="Numeric id of the registered hook", ge=1)],
+) -> str:
+    """Get one registered web hook including its current failure penalty.
+
+    Returns:
+        str: JSON describing the hook (secKey is masked)
+    """
+    return format_response(_redact_hook_secrets(_hooks_request(f"{id}.json")))
+
+
+@mcp.tool(
+    title="Register Web Hook",
+    annotations=_HOOK_CREATE_ANN,
+)
+def webhook_register(
+    url: Annotated[str, Field(description="http(s) URL AbraFlexi will POST changes to; must answer 2xx to an empty test call", min_length=8, max_length=2048)],
+    format: Annotated[Literal["JSON", "XML"], Field(description="Format of the notification body")] = "JSON",
+    sec_key: Annotated[Optional[str], Field(description="Optional secret AbraFlexi sends in the X-FB-Hook-SecKey header so the receiver can verify the origin", min_length=1, max_length=256, pattern=r"^\S+$")] = None,
+    last_version: Annotated[Optional[int], Field(description="Start sending from the version following this one (0..globalVersion); defaults to the current globalVersion", ge=0)] = None,
+    skip_url_test: Annotated[bool, Field(description="Skip the empty test notification AbraFlexi sends at registration")] = False,
+) -> str:
+    """Register a web hook so AbraFlexi pushes every change of this company to ``url``.
+
+    Creates a new hook on the AbraFlexi server (calling it twice registers two
+    hooks, so check webhook_list first). A hook cannot be filtered by evidence;
+    the receiver gets all changes. Ask the user for confirmation before
+    registering a hook that points at a production receiver.
+
+    Returns:
+        str: JSON result of the registration (secKey is masked)
+    """
+    validate_read_only()
+    params: Dict[str, Any] = {"url": _validate_hook_url(url), "format": format}
+    if sec_key:
+        params["secKey"] = sec_key
+    if last_version is not None:
+        params["lastVersion"] = last_version
+    if skip_url_test:
+        params["skipUrlTest"] = "true"
+    result = _hooks_request("", "PUT", params)
+    return format_response(_redact_hook_secrets(result))
+
+
+@mcp.tool(
+    title="Unregister Web Hook",
+    annotations=_HOOK_MUTATE_ANN,
+)
+def webhook_unregister(
+    id: Annotated[int, Field(description="Numeric id of the hook to unregister (see webhook_list)", ge=1)],
+) -> str:
+    """Unregister a web hook; AbraFlexi stops sending changes to its URL.
+
+    Returns:
+        str: JSON result of the deletion
+    """
+    validate_read_only()
+    return format_response(_redact_hook_secrets(_hooks_request(f"{id}.json", "DELETE")))
+
+
+@mcp.tool(
+    title="Retry Web Hook",
+    annotations=_HOOK_CREATE_ANN,
+)
+def webhook_retry(
+    id: Annotated[int, Field(description="Numeric id of the hook whose failure penalty should be reset", ge=1)],
+) -> str:
+    """Reset the failure penalty of a hook and make AbraFlexi call its URL immediately.
+
+    Returns:
+        str: JSON result of the retry request
+    """
+    validate_read_only()
+    return format_response(_redact_hook_secrets(_hooks_request(f"{id}/retry.json", "PUT")))
 
 
 # ISSUED INVOICE BUSINESS LOGIC (FakturaVydana)
