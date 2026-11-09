@@ -94,7 +94,7 @@ def test_register_minimal_omits_optional_parameters():
     assert client.calls[0][2] == {"url": "https://example.com/hook", "format": "JSON"}
 
 
-@pytest.mark.parametrize("bad", ["ftp://x/h", "javascript:alert(1)", "https://user:pw@host/h", "http:///nohost", "not a url"])
+@pytest.mark.parametrize("bad", ["ftp://x/h", "javascript:alert(1)", "https://user:pw@host/h", "http:///nohost", "not a url", "https://evil.com\\@allowed.example/h", "https://a.example/h h", "https://a.example/h\nx", "https://[::1/h", "https://exa mple.com/h", "https://a.example:99999/h"])
 def test_register_rejects_unsafe_urls(bad):
     with patch_client(FakeClient()) as p:
         with pytest.raises(ValueError):
@@ -176,3 +176,40 @@ def test_register_unrestricted_when_allowlist_unset(monkeypatch):
     with patch_client(client):
         server.webhook_register(url="https://anything.example/hook")
     assert client.calls[0][2]["url"] == "https://anything.example/hook"
+
+
+def test_register_forwards_canonical_url_not_raw_string():
+    client = FakeClient()
+    with patch_client(client):
+        server.webhook_register(url="  HTTPS://Receiver.Example.COM.:8443/hook?x=1#frag  ")
+    assert client.calls[0][2]["url"] == "https://receiver.example.com:8443/hook?x=1"
+
+
+def test_register_idna_encodes_host_before_allowlist(monkeypatch):
+    monkeypatch.setenv("ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS", "xn--hkyrky-ptac70bc.cz")
+    client = FakeClient()
+    with patch_client(client):
+        server.webhook_register(url="https://háčkyčárky.cz/hook")
+    assert client.calls[0][2]["url"] == "https://xn--hkyrky-ptac70bc.cz/hook"
+
+
+def test_wildcard_matches_whole_labels_only(monkeypatch):
+    monkeypatch.setenv("ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS", "*.spoje.net")
+    assert server._hook_host_allowed("a.spoje.net")
+    assert not server._hook_host_allowed("spoje.net")
+    assert not server._hook_host_allowed("evilspoje.net")
+    assert not server._hook_host_allowed("spoje.net.evil.com")
+
+
+@pytest.mark.parametrize("url", [
+    "https://evil.com#@allowed.example/h",
+    "https://evil.com?@allowed.example/h",
+    "https://evil.com/@allowed.example",
+    "https://allowed.example.evil.com/h",
+])
+def test_allowlist_checks_the_real_host_not_lookalikes(monkeypatch, url):
+    monkeypatch.setenv("ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS", "allowed.example")
+    with patch_client(FakeClient()) as p:
+        with pytest.raises(ValueError, match="ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS"):
+            server.webhook_register(url=url)
+    p.assert_not_called()

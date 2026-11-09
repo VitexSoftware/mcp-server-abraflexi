@@ -16,8 +16,10 @@ import json
 import logging
 import base64
 import inspect
+import ipaddress
+import re
 from typing import Annotated, Any, Dict, List, Literal, Optional, Union
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode, urlsplit, urlunsplit
 from fastmcp import FastMCP
 from pydantic import Field
 from python_abraflexi import ReadOnly, ReadWrite, Changes, Adresar, FakturaVydana
@@ -2310,24 +2312,53 @@ def _hook_host_allowed(host: str) -> bool:
     return False
 
 
+_HOOK_HOST_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$")
+
+
 def _validate_hook_url(url: str) -> str:
-    """Accept only plain http(s) URLs without embedded credentials.
+    """Validate a hook receiver URL and return its canonical form.
 
     A hook receives EVERY change of the company, so where it points matters:
     set ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS to restrict the receivers this server
-    may register (checked on the host name, as AbraFlexi - not this process -
-    resolves and calls the URL).
+    may register. The check runs on the host name (AbraFlexi - not this
+    process - resolves and calls the URL). To avoid parser differentials
+    between this check and AbraFlexi, anything ambiguous is rejected and the
+    URL sent to AbraFlexi is rebuilt from the validated parts instead of
+    forwarding the raw string.
     """
-    parts = urlsplit(url.strip())
-    if parts.scheme not in ("http", "https") or not parts.hostname:
+    raw = url.strip()
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in raw) or "\\" in raw:
+        raise ValueError("Hook url must not contain whitespace, control characters or backslashes")
+    parts = urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
         raise ValueError("Hook url must be an absolute http:// or https:// URL")
-    if parts.username or parts.password:
+    if "@" in parts.netloc or parts.username or parts.password:
         raise ValueError("Hook url must not contain credentials; use sec_key instead")
-    if not _hook_host_allowed(parts.hostname):
-        raise ValueError(
-            f"Host '{parts.hostname}' is not allowed by ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS"
-        )
-    return url.strip()
+    host = (parts.hostname or "").rstrip(".").lower()
+    try:
+        port = parts.port
+    except ValueError:
+        raise ValueError("Hook url has an invalid port") from None
+    try:
+        ipaddress.ip_address(host)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+    if not is_ip:
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError:
+            raise ValueError("Hook url has an invalid host name") from None
+        if not _HOOK_HOST_RE.match(host):
+            raise ValueError("Hook url has an invalid host name")
+    if not host:
+        raise ValueError("Hook url must contain a host name")
+    if not _hook_host_allowed(host):
+        raise ValueError(f"Host '{host}' is not allowed by ABRAFLEXI_WEBHOOK_ALLOWED_HOSTS")
+    netloc = f"[{host}]" if ":" in host else host
+    if port:
+        netloc += f":{port}"
+    return urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, ""))
 
 
 def _hooks_request(
